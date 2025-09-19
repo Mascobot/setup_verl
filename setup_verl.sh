@@ -34,6 +34,12 @@ cd ..
 
 echo "Setup completed successfully!"
 
+# Install requirements from verl folder
+echo "Installing requirements from verl/requirements.txt..."
+cd verl
+pip install -r requirements.txt
+cd ..
+
 # -------- Additional Setup: Jupyter Configuration --------
 
 # -------- Helpers --------
