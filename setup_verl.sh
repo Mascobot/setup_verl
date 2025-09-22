@@ -205,6 +205,27 @@ fi
 uv init verl_project
 cd verl_project
 
+# Try to install Python 3.12, fallback to available versions
+print_status "Installing Python 3.12..."
+if ! uv python install 3.12; then
+    print_warning "Python 3.12 not available, trying Python 3.11..."
+    if ! uv python install 3.11; then
+        print_warning "Python 3.11 not available, using system Python..."
+        uv python install
+    fi
+fi
+
+# Pin the installed Python version
+PYTHON_VERSION=$(uv python list | grep -E '^\*' | awk '{print $2}' | head -1)
+if [ ! -z "$PYTHON_VERSION" ]; then
+    print_status "Pinning Python version: $PYTHON_VERSION"
+    uv python pin $PYTHON_VERSION
+else
+    print_status "Using default Python version"
+fi
+
+uv sync
+
 # 8. Add libraries
 print_status "Adding Jupyter and notebook to UV project..."
 uv add jupyter notebook
@@ -270,15 +291,43 @@ echo ""
 
 # Get system information
 UBUNTU_VERSION=$(lsb_release -d | awk -F'\t' '{print $2}')
-PYTHON_VERSION=$(python3 --version 2>&1 | awk '{print $2}')
-PYTORCH_VERSION=$(python3 -c "import torch; print(torch.__version__)" 2>/dev/null || echo "Not installed")
-VLLM_VERSION=$(python3 -c "import vllm; print(vllm.__version__)" 2>/dev/null || echo "Not installed")
+
+# Get Python version - try multiple methods
+PYTHON_VERSION=""
+if [ -f ".venv/bin/python" ]; then
+    PYTHON_VERSION=$(.venv/bin/python --version 2>&1 | awk '{print $2}')
+elif command -v python3 &> /dev/null; then
+    PYTHON_VERSION=$(python3 --version 2>&1 | awk '{print $2}')
+else
+    PYTHON_VERSION="Not detected"
+fi
+
+# Get PyTorch version
+PYTORCH_VERSION=""
+if [ -f ".venv/bin/python" ]; then
+    PYTORCH_VERSION=$(.venv/bin/python -c "import torch; print(torch.__version__)" 2>/dev/null || echo "Not installed")
+else
+    PYTORCH_VERSION=$(python3 -c "import torch; print(torch.__version__)" 2>/dev/null || echo "Not installed")
+fi
+
+# Get vLLM version
+VLLM_VERSION=""
+if [ -f ".venv/bin/python" ]; then
+    VLLM_VERSION=$(.venv/bin/python -c "import vllm; print(vllm.__version__)" 2>/dev/null || echo "Not installed")
+else
+    VLLM_VERSION=$(python3 -c "import vllm; print(vllm.__version__)" 2>/dev/null || echo "Not installed")
+fi
+
 CUDA_VERSION=$(nvcc --version 2>/dev/null | grep "release" | awk '{print $6}' | cut -d',' -f1 || echo "Not detected")
 
 # Try multiple methods to detect cuDNN version
 CUDNN_VERSION="Not detected"
 # Method 1: Python/PyTorch
-CUDNN_VERSION=$(python3 -c "import torch; print(torch.backends.cudnn.version())" 2>/dev/null || echo "")
+if [ -f ".venv/bin/python" ]; then
+    CUDNN_VERSION=$(.venv/bin/python -c "import torch; print(torch.backends.cudnn.version())" 2>/dev/null || echo "")
+else
+    CUDNN_VERSION=$(python3 -c "import torch; print(torch.backends.cudnn.version())" 2>/dev/null || echo "")
+fi
 # Method 2: Check header file
 if [ -z "$CUDNN_VERSION" ] || [ "$CUDNN_VERSION" = "" ]; then
     for header in "/usr/include/cudnn_version.h" "/usr/local/cuda/include/cudnn_version.h" "/usr/include/x86_64-linux-gnu/cudnn_version.h"; do
@@ -299,7 +348,14 @@ if [ -z "$CUDNN_VERSION" ] || [ "$CUDNN_VERSION" = "" ]; then
     [ -z "$CUDNN_VERSION" ] && CUDNN_VERSION="Not detected"
 fi
 
-APEX_VERSION=$(python3 -c "import apex; print('Installed')" 2>/dev/null || echo "Not installed")
+# Get Apex version
+APEX_VERSION=""
+if [ -f ".venv/bin/python" ]; then
+    APEX_VERSION=$(.venv/bin/python -c "import apex; print('Installed')" 2>/dev/null || echo "Not installed")
+else
+    APEX_VERSION=$(python3 -c "import apex; print('Installed')" 2>/dev/null || echo "Not installed")
+fi
+
 CUDA_DEVICES=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | wc -l || echo "0")
 GPU_NAMES=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | paste -sd ", " || echo "No GPUs detected")
 
