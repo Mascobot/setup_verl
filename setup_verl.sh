@@ -1,178 +1,260 @@
 #!/bin/bash
 
-# Setup script to install and configure apex and verl
-# This script will automatically answer 'yes' to all prompts
+# Exit on error
+set -e
 
-set -e  # Exit on any error
+# Color codes for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
 
-echo "Starting setup process..."
+echo -e "${GREEN}Starting Ubuntu Server Setup for VERL Project${NC}"
+echo "=================================================="
 
-# Install CUDA 12.9 first
-echo "Installing CUDA 12.9..."
-wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-ubuntu2204.pin
-mv cuda-ubuntu2204.pin /etc/apt/preferences.d/cuda-repository-pin-600
-wget https://developer.download.nvidia.com/compute/cuda/12.9.0/local_installers/cuda-repo-ubuntu2204-12-9-local_12.9.0-575.51.03-1_amd64.deb
-dpkg -i cuda-repo-ubuntu2204-12-9-local_12.9.0-575.51.03-1_amd64.deb
-cp /var/cuda-repo-ubuntu2204-12-9-local/cuda-*-keyring.gpg /usr/share/keyrings/
-apt-get update
-apt-get -y install cuda-toolkit-12-9
+# Function to print colored messages
+print_status() {
+    echo -e "${GREEN}[INFO]${NC} $1"
+}
 
-# Install/upgrade PyTorch to latest version with CUDA 12.9 support
-echo "Upgrading PyTorch to latest version..."
-pip3 uninstall -y torch torchvision torchaudio || true
-pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu129
+print_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
 
-# Update system packages with automatic yes
-echo "Updating package lists..."
+print_warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+# 1. Update packages
+print_status "Updating system packages..."
+export DEBIAN_FRONTEND=noninteractive
 apt update -y
-
-echo "Upgrading packages..."
 apt upgrade -y
-
-echo "Performing distribution upgrade..."
 apt dist-upgrade -y
 
-# Install NVIDIA apex
-echo "Cloning and installing NVIDIA apex..."
+# 2. Check and install CUDA if needed
+print_status "Checking CUDA installation..."
+CUDA_VERSION_REQUIRED="12.4"
+CUDA_INSTALLED=false
+CURRENT_CUDA_VERSION=""
+
+if command -v nvcc &> /dev/null; then
+    CURRENT_CUDA_VERSION=$(nvcc --version | grep "release" | awk '{print $6}' | cut -d',' -f1)
+    print_status "Found CUDA version: $CURRENT_CUDA_VERSION"
+    CUDA_INSTALLED=true
+    
+    # Compare versions
+    if [ "$(printf '%s\n' "$CUDA_VERSION_REQUIRED" "$CURRENT_CUDA_VERSION" | sort -V | head -n1)" != "$CUDA_VERSION_REQUIRED" ]; then
+        print_warning "CUDA version is less than $CUDA_VERSION_REQUIRED. Installing CUDA 12.4..."
+        CUDA_INSTALLED=false
+    fi
+else
+    print_warning "CUDA not found. Installing CUDA 12.4..."
+fi
+
+if [ "$CUDA_INSTALLED" = false ]; then
+    print_status "Downloading and installing CUDA 12.4..."
+    wget -q https://developer.download.nvidia.com/compute/cuda/12.4.1/local_installers/cuda-repo-ubuntu2204-12-4-local_12.4.1-550.54.15-1_amd64.deb
+    dpkg -i cuda-repo-ubuntu2204-12-4-local_12.4.1-550.54.15-1_amd64.deb
+    cp /var/cuda-repo-ubuntu2204-12-4-local/cuda-*-keyring.gpg /usr/share/keyrings/
+    apt-get update
+    apt-get -y install cuda-toolkit-12-4
+    update-alternatives --set cuda /usr/local/cuda-12.4
+    
+    # Add CUDA to PATH
+    echo 'export PATH=/usr/local/cuda-12.4/bin:$PATH' >> ~/.bashrc
+    echo 'export LD_LIBRARY_PATH=/usr/local/cuda-12.4/lib64:$LD_LIBRARY_PATH' >> ~/.bashrc
+    export PATH=/usr/local/cuda-12.4/bin:$PATH
+    export LD_LIBRARY_PATH=/usr/local/cuda-12.4/lib64:$LD_LIBRARY_PATH
+    
+    # Clean up
+    rm -f cuda-repo-ubuntu2204-12-4-local_12.4.1-550.54.15-1_amd64.deb
+fi
+
+# 3. Check and install cuDNN if needed
+print_status "Checking cuDNN installation..."
+CUDNN_VERSION_REQUIRED="9.8.0"
+CUDNN_INSTALLED=false
+
+# Check if cuDNN is installed
+if [ -f "/usr/include/cudnn_version.h" ] || [ -f "/usr/local/cuda/include/cudnn_version.h" ]; then
+    if [ -f "/usr/include/cudnn_version.h" ]; then
+        CUDNN_HEADER="/usr/include/cudnn_version.h"
+    else
+        CUDNN_HEADER="/usr/local/cuda/include/cudnn_version.h"
+    fi
+    
+    CUDNN_MAJOR=$(grep CUDNN_MAJOR $CUDNN_HEADER | head -1 | awk '{print $3}')
+    CUDNN_MINOR=$(grep CUDNN_MINOR $CUDNN_HEADER | head -1 | awk '{print $3}')
+    CUDNN_PATCHLEVEL=$(grep CUDNN_PATCHLEVEL $CUDNN_HEADER | head -1 | awk '{print $3}')
+    
+    if [ ! -z "$CUDNN_MAJOR" ]; then
+        CURRENT_CUDNN_VERSION="${CUDNN_MAJOR}.${CUDNN_MINOR}.${CUDNN_PATCHLEVEL}"
+        print_status "Found cuDNN version: $CURRENT_CUDNN_VERSION"
+        CUDNN_INSTALLED=true
+        
+        # Compare versions
+        if [ "$(printf '%s\n' "$CUDNN_VERSION_REQUIRED" "$CURRENT_CUDNN_VERSION" | sort -V | head -n1)" != "$CUDNN_VERSION_REQUIRED" ]; then
+            print_warning "cuDNN version is less than $CUDNN_VERSION_REQUIRED. Installing cuDNN 9.8.0..."
+            CUDNN_INSTALLED=false
+        fi
+    fi
+else
+    print_warning "cuDNN not found. Installing cuDNN 9.8.0..."
+fi
+
+if [ "$CUDNN_INSTALLED" = false ]; then
+    print_status "Downloading and installing cuDNN 9.8.0..."
+    wget -q https://developer.download.nvidia.com/compute/cudnn/9.8.0/local_installers/cudnn-local-repo-ubuntu2204-9.8.0_1.0-1_amd64.deb
+    dpkg -i cudnn-local-repo-ubuntu2204-9.8.0_1.0-1_amd64.deb
+    cp /var/cudnn-local-repo-ubuntu2204-9.8.0/cudnn-*-keyring.gpg /usr/share/keyrings/
+    apt-get update
+    apt-get -y install cudnn-cuda-12
+    
+    # Clean up
+    rm -f cudnn-local-repo-ubuntu2204-9.8.0_1.0-1_amd64.deb
+fi
+
+# 4. Install Apex
+print_status "Installing NVIDIA Apex..."
+if [ -d "apex" ]; then
+    print_warning "Apex directory already exists. Removing old installation..."
+    rm -rf apex
+fi
+
 git clone https://github.com/NVIDIA/apex.git
 cd apex
-MAX_JOB=32 pip install -v --disable-pip-version-check --no-cache-dir --no-build-isolation --config-settings "--build-option=--cpp_ext" --config-settings "--build-option=--cuda_ext" ./
+MAX_JOBS=32 pip install -v --disable-pip-version-check --no-cache-dir --no-build-isolation --config-settings "--build-option=--cpp_ext" --config-settings "--build-option=--cuda_ext" ./
 cd ..
 
-# Install verl
-echo "Cloning and installing verl..."
+# 5. Install nano and tmux
+print_status "Installing nano and tmux..."
+apt install nano -y
+apt install tmux -y
+
+# 6. Install UV
+print_status "Installing UV..."
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source $HOME/.cargo/env
+
+# 7. Initialize UV project
+print_status "Initializing UV project..."
+if [ -d "verl_project" ]; then
+    print_warning "verl_project directory already exists. Removing old project..."
+    rm -rf verl_project
+fi
+
+uv init verl_project
+cd verl_project
+uv python install 3.12.16
+uv python pin 3.12.16
+uv sync
+
+# 8. Add libraries
+print_status "Adding Jupyter and notebook to UV project..."
+uv add jupyter notebook
+
+# 9. Activate environment
+print_status "Activating virtual environment..."
+source .venv/bin/activate
+
+# 10. Clone and install VERL
+print_status "Cloning and installing VERL..."
+if [ -d "verl" ]; then
+    print_warning "verl directory already exists. Removing old installation..."
+    rm -rf verl
+fi
+
 git clone https://github.com/volcengine/verl.git
 cd verl
-pip install --no-deps -e .
 USE_MEGATRON=0 bash scripts/install_vllm_sglang_mcore.sh
+uv pip install --no-deps -e .
 cd ..
 
-echo "Setup completed successfully!"
+# 11. Add vLLM
+print_status "Adding vLLM..."
+uv add vllm
 
-# Install requirements from verl folder
-echo "Installing requirements from verl/requirements.txt..."
-cd verl
-pip install -r requirements.txt
-cd ..
+# 12. Configure Jupyter for remote session
+print_status "Configuring Jupyter for remote access..."
+jupyter notebook --generate-config
 
-# -------- Additional Setup: Jupyter Configuration --------
-
-# -------- Helpers --------
-prompt_default() {
-  local prompt="$1" default="$2" var
-  read -rp "$prompt [$default]: " var
-  echo "${var:-$default}"
-}
-log() { printf "\n\033[1;32m[+] %s\033[0m\n" "$*"; }
-err() { printf "\n\033[1;31m[!] %s\033[0m\n" "$*"; }
-
-SUDO=""; command -v sudo >/dev/null 2>&1 && SUDO="sudo"
-
-# -------- Prompt for inputs (with defaults) --------
-JUPYTER_PORT=$(prompt_default "Jupyter port" "5000")
-
-# -------- Install nano and tmux --------
-log "Installing nano & tmux via apt…"
-$SUDO apt update -y
-$SUDO apt install -y nano tmux
-
-# -------- Install Jupyter --------
-log "Installing Jupyter packages with pip…"
-pip install jupyter notebook jupyterlab
-
-# -------- Configure Jupyter for remote use --------
-log "Generating and writing Jupyter config…"
-jupyter notebook --generate-config >/dev/null 2>&1 || true
-CONFIG="${HOME}/.jupyter/jupyter_notebook_config.py"
-cat > "${CONFIG}" <<EOF
+# 13. Add configuration to jupyter_notebook_config.py
+cat > ~/.jupyter/jupyter_notebook_config.py << 'EOF'
 c = get_config()
 
-# Modern Jupyter (ServerApp)
-c.ServerApp.ip = '0.0.0.0'
-c.ServerApp.port = ${JUPYTER_PORT}
-c.ServerApp.open_browser = False
-c.ServerApp.allow_remote_access = True
-c.ServerApp.allow_origin = '*'
-
-# Backward-compat (NotebookApp)
-c.NotebookApp.ip = '0.0.0.0'
-c.NotebookApp.port = ${JUPYTER_PORT}
+c.NotebookApp.ip = '*'
 c.NotebookApp.open_browser = False
+c.NotebookApp.port = 5000
 c.NotebookApp.allow_remote_access = True
 c.NotebookApp.allow_origin = '*'
 EOF
 
-# -------- Launch Jupyter Lab inside tmux --------
-SESSION="jupyter_session"
-log "Starting Jupyter Lab in tmux session '${SESSION}' on port ${JUPYTER_PORT}…"
-tmux has-session -t "${SESSION}" 2>/dev/null && tmux kill-session -t "${SESSION}" || true
+# 14. Start Jupyter in tmux
+print_status "Starting Jupyter notebook in tmux session..."
+tmux new-session -d -s jupyter "cd $(pwd) && source .venv/bin/activate && jupyter notebook --port 5000 --no-browser --allow-root 2>&1 | tee jupyter.log"
 
-# Launch Jupyter Lab in tmux
-tmux new-session -d -s "${SESSION}" \
-  "bash -lc 'exec jupyter lab --port=${JUPYTER_PORT} --no-browser --allow-root'"
+# Wait for Jupyter to start and capture the token
+sleep 5
 
-# -------- Poll for server & print token --------
-log "Fetching Jupyter server token…"
-
-# Helper to query server list
-server_list() { jupyter server list 2>/dev/null || true; }
-
-TOKEN_LINE=""
-for i in $(seq 1 90); do
-  TOKEN_LINE=$(server_list | awk -v p=":${JUPYTER_PORT}/" '$0 ~ p {print; exit}')
-  if [[ -n "$TOKEN_LINE" ]]; then
-    break
-  fi
-  sleep 1
-done
-
-TOKEN=""
-if [[ -n "$TOKEN_LINE" ]]; then
-  # Extract token if present
-  TOKEN=$(printf "%s" "$TOKEN_LINE" | sed -n 's/.*token=\([^[:space:]]*\).*/\1/p')
+# Get the Jupyter URL with token
+JUPYTER_URL=$(grep -o 'http://.*:5000/.*token=[a-z0-9]*' jupyter.log | tail -1)
+if [ -z "$JUPYTER_URL" ]; then
+    JUPYTER_URL=$(jupyter notebook list | grep ':5000' | awk '{print $1}')
 fi
 
-# -------- Final info + diagnostics --------
-cat <<INFO
+# Extract token from URL
+TOKEN=$(echo $JUPYTER_URL | grep -o 'token=[a-z0-9]*' | cut -d'=' -f2)
 
-========================================================
-✅ Complete setup finished.
+# 15. Display installation summary
+echo ""
+echo "=========================================="
+echo -e "${GREEN}Installation Complete!${NC}"
+echo "=========================================="
+echo ""
 
-Jupyter:     running in tmux session '${SESSION}' on port ${JUPYTER_PORT}
+# Get system information
+UBUNTU_VERSION=$(lsb_release -d | awk -F'\t' '{print $2}')
+PYTHON_VERSION=$(python3 --version 2>&1 | awk '{print $2}')
+PYTORCH_VERSION=$(python3 -c "import torch; print(torch.__version__)" 2>/dev/null || echo "Not installed")
+VLLM_VERSION=$(python3 -c "import vllm; print(vllm.__version__)" 2>/dev/null || echo "Not installed")
+CUDA_VERSION=$(nvcc --version | grep "release" | awk '{print $6}' | cut -d',' -f1)
+CUDNN_VERSION=$(python3 -c "import torch; print(torch.backends.cudnn.version())" 2>/dev/null || echo "Check manually")
+APEX_VERSION=$(python3 -c "import apex; print('Installed')" 2>/dev/null || echo "Not installed")
+CUDA_DEVICES=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | wc -l || echo "0")
 
-Attach to the session:
-  tmux attach -t ${SESSION}
+echo -e "${GREEN}System Information:${NC}"
+echo "==================="
+echo "Ubuntu Version: $UBUNTU_VERSION"
+echo "Python Version: $PYTHON_VERSION"
+echo "PyTorch Version: $PYTORCH_VERSION"
+echo "CUDA Version: $CUDA_VERSION"
+echo "cuDNN Version: $CUDNN_VERSION"
+echo "vLLM Version: $VLLM_VERSION"
+echo "Apex: $APEX_VERSION"
+echo "CUDA_VISIBLE_DEVICES: $CUDA_DEVICES GPU(s) available"
+echo ""
 
-Set a password (optional, one-time):
-  tmux new-window -t ${SESSION} -n setpass "jupyter lab password"
-
-List running servers:
-  tmux new-window -t ${SESSION} -n servers "jupyter server list"
-  
-SSH port-forward from your laptop:
-  ssh -N -L ${JUPYTER_PORT}:localhost:${JUPYTER_PORT} user@your-server
-========================================================
-INFO
-
-if [[ -n "$TOKEN_LINE" ]]; then
-  echo "Server URL (raw):"
-  echo "  $TOKEN_LINE"
-  if [[ -n "$TOKEN" ]]; then
-    echo
-    echo "Open in browser after SSH port-forwarding:"
-    echo "  http://localhost:${JUPYTER_PORT}/?token=${TOKEN}"
-  fi
-else
-  err "Could not retrieve the Jupyter URL yet (port ${JUPYTER_PORT})."
-
-  echo -e "\nDiagnostics:"
-  echo "1) tmux sessions:"
-  tmux ls || true
-
-  echo -e "\n2) Last 80 lines from the Jupyter tmux pane:"
-  tmux capture-pane -t "${SESSION}:.+0" -p -S -80 || true
-
-  echo -e "\n3) Manual checks you can run:"
-  echo "   tmux attach -t ${SESSION}"
-  echo "   jupyter server list"
-fi
+echo -e "${GREEN}Jupyter Notebook Access:${NC}"
+echo "========================"
+echo "Jupyter is running in tmux session 'jupyter'"
+echo ""
+echo "Local URL with token:"
+echo "http://localhost:5000/?token=$TOKEN"
+echo ""
+echo -e "${YELLOW}To access from your local computer, run:${NC}"
+echo "ssh -N -f -L localhost:5000:localhost:5000 <your_username>@<your_server_ip>"
+echo ""
+echo "Then open in your browser:"
+echo "http://localhost:5000/?token=$TOKEN"
+echo ""
+echo -e "${GREEN}Other useful commands:${NC}"
+echo "======================"
+echo "View Jupyter logs: tmux attach -t jupyter"
+echo "Detach from tmux: Press Ctrl+B, then D"
+echo "Kill Jupyter session: tmux kill-session -t jupyter"
+echo ""
+echo "Project location: $(pwd)"
+echo "Activate environment: source $(pwd)/.venv/bin/activate"
+echo ""
+echo -e "${GREEN}Setup complete! Enjoy your VERL project!${NC}"
