@@ -175,10 +175,28 @@ apt install tmux -y
 # 6. Install UV
 print_status "Installing UV..."
 curl -LsSf https://astral.sh/uv/install.sh | sh
-source $HOME/.cargo/env
+
+# Add UV to PATH
+export PATH="$HOME/.local/bin:$PATH"
+source $HOME/.local/bin/env 2>/dev/null || true
+
+# Verify UV installation
+if ! command -v uv &> /dev/null; then
+    print_warning "UV not found in PATH, attempting to add it..."
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+    source ~/.bashrc
+fi
 
 # 7. Initialize UV project
 print_status "Initializing UV project..."
+
+# Ensure UV is available
+if ! command -v uv &> /dev/null; then
+    print_error "UV command not found. Please ensure UV is installed and in PATH."
+    print_status "You may need to run: source $HOME/.local/bin/env"
+    exit 1
+fi
+
 if [ -d "verl_project" ]; then
     print_warning "verl_project directory already exists. Removing old project..."
     rm -rf verl_project
