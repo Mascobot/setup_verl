@@ -204,9 +204,6 @@ fi
 
 uv init verl_project
 cd verl_project
-uv python install 3.12.16
-uv python pin 3.12.16
-uv sync
 
 # 8. Add libraries
 print_status "Adding Jupyter and notebook to UV project..."
