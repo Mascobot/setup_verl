@@ -76,17 +76,20 @@ print_status "Checking cuDNN installation..."
 CUDNN_VERSION_REQUIRED="9.8.0"
 CUDNN_INSTALLED=false
 
-# Check if cuDNN is installed
-if [ -f "/usr/include/cudnn_version.h" ] || [ -f "/usr/local/cuda/include/cudnn_version.h" ]; then
+# Check if cuDNN is installed using multiple methods
+# Method 1: Check for cudnn_version.h header file
+if [ -f "/usr/include/cudnn_version.h" ] || [ -f "/usr/local/cuda/include/cudnn_version.h" ] || [ -f "/usr/include/x86_64-linux-gnu/cudnn_version.h" ]; then
     if [ -f "/usr/include/cudnn_version.h" ]; then
         CUDNN_HEADER="/usr/include/cudnn_version.h"
-    else
+    elif [ -f "/usr/local/cuda/include/cudnn_version.h" ]; then
         CUDNN_HEADER="/usr/local/cuda/include/cudnn_version.h"
+    else
+        CUDNN_HEADER="/usr/include/x86_64-linux-gnu/cudnn_version.h"
     fi
     
-    CUDNN_MAJOR=$(grep CUDNN_MAJOR $CUDNN_HEADER | head -1 | awk '{print $3}')
-    CUDNN_MINOR=$(grep CUDNN_MINOR $CUDNN_HEADER | head -1 | awk '{print $3}')
-    CUDNN_PATCHLEVEL=$(grep CUDNN_PATCHLEVEL $CUDNN_HEADER | head -1 | awk '{print $3}')
+    CUDNN_MAJOR=$(grep CUDNN_MAJOR $CUDNN_HEADER 2>/dev/null | head -1 | awk '{print $3}')
+    CUDNN_MINOR=$(grep CUDNN_MINOR $CUDNN_HEADER 2>/dev/null | head -1 | awk '{print $3}')
+    CUDNN_PATCHLEVEL=$(grep CUDNN_PATCHLEVEL $CUDNN_HEADER 2>/dev/null | head -1 | awk '{print $3}')
     
     if [ ! -z "$CUDNN_MAJOR" ]; then
         CURRENT_CUDNN_VERSION="${CUDNN_MAJOR}.${CUDNN_MINOR}.${CUDNN_PATCHLEVEL}"
@@ -99,17 +102,54 @@ if [ -f "/usr/include/cudnn_version.h" ] || [ -f "/usr/local/cuda/include/cudnn_
             CUDNN_INSTALLED=false
         fi
     fi
-else
-    print_warning "cuDNN not found. Installing cuDNN 9.8.0..."
+fi
+
+# Method 2: Check using dpkg if header method failed
+if [ "$CUDNN_INSTALLED" = false ]; then
+    CUDNN_PKG=$(dpkg -l | grep -E "libcudnn[0-9]+-cuda-" | awk '{print $2, $3}')
+    if [ ! -z "$CUDNN_PKG" ]; then
+        CUDNN_VERSION=$(echo "$CUDNN_PKG" | awk '{print $2}' | cut -d'-' -f1)
+        print_status "Found cuDNN package version: $CUDNN_VERSION"
+        if [ ! -z "$CUDNN_VERSION" ]; then
+            CUDNN_INSTALLED=true
+            # Compare versions
+            if [ "$(printf '%s\n' "$CUDNN_VERSION_REQUIRED" "$CUDNN_VERSION" | sort -V | head -n1)" != "$CUDNN_VERSION_REQUIRED" ]; then
+                print_warning "cuDNN version is less than $CUDNN_VERSION_REQUIRED. Will attempt to install cuDNN 9.8.0..."
+                CUDNN_INSTALLED=false
+            fi
+        fi
+    else
+        print_warning "cuDNN not found. Installing cuDNN 9.8.0..."
+    fi
 fi
 
 if [ "$CUDNN_INSTALLED" = false ]; then
+    print_status "Preparing cuDNN 9.8.0 installation..."
+    
+    # First, remove any conflicting cuDNN packages
+    print_status "Removing conflicting cuDNN packages if any..."
+    apt-get remove -y libcudnn9-dev-cuda-12 libcudnn9-cuda-12 2>/dev/null || true
+    apt-get autoremove -y 2>/dev/null || true
+    
+    # Download and install cuDNN
     print_status "Downloading and installing cuDNN 9.8.0..."
     wget -q https://developer.download.nvidia.com/compute/cudnn/9.8.0/local_installers/cudnn-local-repo-ubuntu2204-9.8.0_1.0-1_amd64.deb
     dpkg -i cudnn-local-repo-ubuntu2204-9.8.0_1.0-1_amd64.deb
-    cp /var/cudnn-local-repo-ubuntu2204-9.8.0/cudnn-*-keyring.gpg /usr/share/keyrings/
+    
+    # Copy the keyring
+    cp /var/cudnn-local-repo-ubuntu2204-9.8.0/cudnn-*-keyring.gpg /usr/share/keyrings/ 2>/dev/null || true
+    
+    # Update package list
     apt-get update
-    apt-get -y install cudnn-cuda-12
+    
+    # Install specific version of cuDNN
+    apt-get -y install libcudnn9-cuda-12=9.8.0.87-1 || {
+        print_warning "Standard installation failed, trying alternative method..."
+        apt-get -y install --allow-downgrades libcudnn9-cuda-12=9.8.0.87-1 || {
+            print_warning "Downgrade failed, installing available version..."
+            apt-get -y install libcudnn9-cuda-12
+        }
+    }
     
     # Clean up
     rm -f cudnn-local-repo-ubuntu2204-9.8.0_1.0-1_amd64.deb
@@ -218,10 +258,35 @@ UBUNTU_VERSION=$(lsb_release -d | awk -F'\t' '{print $2}')
 PYTHON_VERSION=$(python3 --version 2>&1 | awk '{print $2}')
 PYTORCH_VERSION=$(python3 -c "import torch; print(torch.__version__)" 2>/dev/null || echo "Not installed")
 VLLM_VERSION=$(python3 -c "import vllm; print(vllm.__version__)" 2>/dev/null || echo "Not installed")
-CUDA_VERSION=$(nvcc --version | grep "release" | awk '{print $6}' | cut -d',' -f1)
-CUDNN_VERSION=$(python3 -c "import torch; print(torch.backends.cudnn.version())" 2>/dev/null || echo "Check manually")
+CUDA_VERSION=$(nvcc --version 2>/dev/null | grep "release" | awk '{print $6}' | cut -d',' -f1 || echo "Not detected")
+
+# Try multiple methods to detect cuDNN version
+CUDNN_VERSION="Not detected"
+# Method 1: Python/PyTorch
+CUDNN_VERSION=$(python3 -c "import torch; print(torch.backends.cudnn.version())" 2>/dev/null || echo "")
+# Method 2: Check header file
+if [ -z "$CUDNN_VERSION" ] || [ "$CUDNN_VERSION" = "" ]; then
+    for header in "/usr/include/cudnn_version.h" "/usr/local/cuda/include/cudnn_version.h" "/usr/include/x86_64-linux-gnu/cudnn_version.h"; do
+        if [ -f "$header" ]; then
+            CUDNN_MAJOR=$(grep CUDNN_MAJOR $header 2>/dev/null | head -1 | awk '{print $3}')
+            CUDNN_MINOR=$(grep CUDNN_MINOR $header 2>/dev/null | head -1 | awk '{print $3}')
+            CUDNN_PATCHLEVEL=$(grep CUDNN_PATCHLEVEL $header 2>/dev/null | head -1 | awk '{print $3}')
+            if [ ! -z "$CUDNN_MAJOR" ]; then
+                CUDNN_VERSION="${CUDNN_MAJOR}.${CUDNN_MINOR}.${CUDNN_PATCHLEVEL}"
+                break
+            fi
+        fi
+    done
+fi
+# Method 3: Check package version
+if [ -z "$CUDNN_VERSION" ] || [ "$CUDNN_VERSION" = "" ]; then
+    CUDNN_VERSION=$(dpkg -l | grep -E "libcudnn[0-9]+-cuda-" | awk '{print $3}' | cut -d'-' -f1 | head -1)
+    [ -z "$CUDNN_VERSION" ] && CUDNN_VERSION="Not detected"
+fi
+
 APEX_VERSION=$(python3 -c "import apex; print('Installed')" 2>/dev/null || echo "Not installed")
 CUDA_DEVICES=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | wc -l || echo "0")
+GPU_NAMES=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | paste -sd ", " || echo "No GPUs detected")
 
 echo -e "${GREEN}System Information:${NC}"
 echo "==================="
@@ -232,7 +297,8 @@ echo "CUDA Version: $CUDA_VERSION"
 echo "cuDNN Version: $CUDNN_VERSION"
 echo "vLLM Version: $VLLM_VERSION"
 echo "Apex: $APEX_VERSION"
-echo "CUDA_VISIBLE_DEVICES: $CUDA_DEVICES GPU(s) available"
+echo "CUDA Devices: $CUDA_DEVICES GPU(s) available"
+echo "GPU Names: $GPU_NAMES"
 echo ""
 
 echo -e "${GREEN}Jupyter Notebook Access:${NC}"
