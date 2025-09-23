@@ -155,24 +155,12 @@ if [ "$CUDNN_INSTALLED" = false ]; then
     rm -f cudnn-local-repo-ubuntu2204-9.8.0_1.0-1_amd64.deb
 fi
 
-# 4. Install Apex
-print_status "Installing NVIDIA Apex..."
-if [ -d "apex" ]; then
-    print_warning "Apex directory already exists. Removing old installation..."
-    rm -rf apex
-fi
-
-git clone https://github.com/NVIDIA/apex.git
-cd apex
-MAX_JOBS=32 pip install -v --disable-pip-version-check --no-cache-dir --no-build-isolation --config-settings "--build-option=--cpp_ext" --config-settings "--build-option=--cuda_ext" ./
-cd ..
-
-# 5. Install nano and tmux
+# 4. Install nano and tmux
 print_status "Installing nano and tmux..."
 apt install nano -y
 apt install tmux -y
 
-# 6. Install UV
+# 5. Install UV
 print_status "Installing UV..."
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
@@ -187,7 +175,7 @@ if ! command -v uv &> /dev/null; then
     source ~/.bashrc
 fi
 
-# 7. Initialize UV project
+# 6. Initialize UV project
 print_status "Initializing UV project..."
 
 # Ensure UV is available
@@ -226,15 +214,15 @@ fi
 
 uv sync
 
-# 8. Add libraries
+# 7. Add libraries
 print_status "Adding Jupyter and notebook to UV project..."
 uv add jupyter notebook
 
-# 9. Activate environment
+# 8. Activate environment
 print_status "Activating virtual environment..."
 source .venv/bin/activate
 
-# 10. Clone and install VERL
+# 9. Clone and install VERL
 print_status "Cloning and installing VERL..."
 if [ -d "verl" ]; then
     print_warning "verl directory already exists. Removing old installation..."
@@ -247,9 +235,41 @@ USE_MEGATRON=0 bash scripts/install_vllm_sglang_mcore.sh
 uv pip install --no-deps -e .
 cd ..
 
-# 11. Add vLLM
+# 10. Add vLLM
 print_status "Adding vLLM..."
 uv add vllm
+
+# 11. Install Apex (after environment is set up)
+print_status "Installing NVIDIA Apex..."
+
+# Ensure we're still in the virtual environment
+if [ -z "$VIRTUAL_ENV" ]; then
+    print_warning "Virtual environment not active. Reactivating..."
+    source .venv/bin/activate
+fi
+
+# Verify pip is from venv
+PIP_LOCATION=$(which pip)
+print_status "Using pip from: $PIP_LOCATION"
+
+if [ -d "apex" ]; then
+    print_warning "Apex directory already exists. Removing old installation..."
+    rm -rf apex
+fi
+
+git clone https://github.com/NVIDIA/apex.git
+cd apex
+
+# Double-check we're using the right pip
+if [[ "$PIP_LOCATION" == *".venv"* ]]; then
+    print_status "Installing Apex in UV virtual environment..."
+    MAX_JOBS=32 pip install -v --disable-pip-version-check --no-cache-dir --no-build-isolation --config-settings "--build-option=--cpp_ext" --config-settings "--build-option=--cuda_ext" ./
+else
+    print_error "WARNING: pip is not from virtual environment. Attempting to use venv pip directly..."
+    MAX_JOBS=32 .venv/bin/pip install -v --disable-pip-version-check --no-cache-dir --no-build-isolation --config-settings "--build-option=--cpp_ext" --config-settings "--build-option=--cuda_ext" ./
+fi
+
+cd ..
 
 # 12. Configure Jupyter for remote session
 print_status "Configuring Jupyter for remote access..."
