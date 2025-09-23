@@ -222,6 +222,10 @@ uv add jupyter notebook
 print_status "Activating virtual environment..."
 source .venv/bin/activate
 
+# Store the virtual environment path for later use
+VENV_PATH="$(pwd)/.venv"
+export VENV_PATH
+
 # 9. Clone and install VERL
 print_status "Cloning and installing VERL..."
 if [ -d "verl" ]; then
@@ -242,10 +246,10 @@ uv add vllm
 # 11. Install Apex (after environment is set up)
 print_status "Installing NVIDIA Apex..."
 
-# Ensure we're still in the virtual environment
-if [ -z "$VIRTUAL_ENV" ]; then
-    print_warning "Virtual environment not active. Reactivating..."
-    source .venv/bin/activate
+# Use the stored VENV_PATH to activate the environment properly
+if [ -z "$VIRTUAL_ENV" ] || [ "$VIRTUAL_ENV" != "$VENV_PATH" ]; then
+    print_warning "Virtual environment not active or incorrect. Reactivating..."
+    source "$VENV_PATH/bin/activate"
 fi
 
 # Verify pip is from venv
@@ -260,14 +264,9 @@ fi
 git clone https://github.com/NVIDIA/apex.git
 cd apex
 
-# Double-check we're using the right pip
-if [[ "$PIP_LOCATION" == *".venv"* ]]; then
-    print_status "Installing Apex in UV virtual environment..."
-    MAX_JOBS=32 pip install -v --disable-pip-version-check --no-cache-dir --no-build-isolation --config-settings "--build-option=--cpp_ext" --config-settings "--build-option=--cuda_ext" ./
-else
-    print_error "WARNING: pip is not from virtual environment. Attempting to use venv pip directly..."
-    MAX_JOBS=32 .venv/bin/pip install -v --disable-pip-version-check --no-cache-dir --no-build-isolation --config-settings "--build-option=--cpp_ext" --config-settings "--build-option=--cuda_ext" ./
-fi
+# Use the absolute path to the venv pip
+print_status "Installing Apex using venv pip at: $VENV_PATH/bin/pip"
+MAX_JOBS=32 "$VENV_PATH/bin/pip" install -v --disable-pip-version-check --no-cache-dir --no-build-isolation --config-settings "--build-option=--cpp_ext" --config-settings "--build-option=--cuda_ext" ./
 
 cd ..
 
