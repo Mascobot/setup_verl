@@ -246,27 +246,27 @@ uv add vllm
 # 11. Install Apex (after environment is set up)
 print_status "Installing NVIDIA Apex..."
 
-# Use the stored VENV_PATH to activate the environment properly
-if [ -z "$VIRTUAL_ENV" ] || [ "$VIRTUAL_ENV" != "$VENV_PATH" ]; then
-    print_warning "Virtual environment not active or incorrect. Reactivating..."
-    source "$VENV_PATH/bin/activate"
-fi
-
-# Verify pip is from venv
-PIP_LOCATION=$(which pip)
-print_status "Using pip from: $PIP_LOCATION"
-
 if [ -d "apex" ]; then
     print_warning "Apex directory already exists. Removing old installation..."
     rm -rf apex
 fi
 
 git clone https://github.com/NVIDIA/apex.git
+
+# Since UV manages packages differently, let's use UV to install Apex
+print_status "Installing Apex using UV package manager..."
 cd apex
 
-# Use the absolute path to the venv pip
-print_status "Installing Apex using venv pip at: $VENV_PATH/bin/pip"
-MAX_JOBS=32 "$VENV_PATH/bin/pip" install -v --disable-pip-version-check --no-cache-dir --no-build-isolation --config-settings "--build-option=--cpp_ext" --config-settings "--build-option=--cuda_ext" ./
+# First, try using UV's pip interface
+if command -v uv &> /dev/null; then
+    print_status "Using UV pip to install Apex..."
+    MAX_JOBS=32 uv pip install -v --no-build-isolation ./
+else
+    print_error "UV not found. Apex installation skipped."
+    print_status "To install Apex manually, run:"
+    print_status "  cd apex"
+    print_status "  uv pip install -v --no-build-isolation ./"
+fi
 
 cd ..
 
