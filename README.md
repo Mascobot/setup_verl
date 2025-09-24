@@ -1,4 +1,4 @@
-Ubuntu VERL Setup Script
+VERL Setup Script (tested on Ubuntu)
 Automated installation script for VERL (Volcano Engine Reinforcement Learning) environment on Ubuntu 22.04
 What it does:
 
