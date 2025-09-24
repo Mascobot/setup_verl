@@ -235,8 +235,35 @@ fi
 
 git clone https://github.com/volcengine/verl.git
 cd verl
+
+# Install vllm and sglang
 USE_MEGATRON=0 bash scripts/install_vllm_sglang_mcore.sh
+
+# Install torch first if needed
+uv pip install torch
+
+# Install flash-attn without build isolation (it needs torch during build)
+print_status "Installing flash-attn (this may take a while)..."
+uv pip install flash-attn --no-build-isolation || {
+    print_warning "flash-attn installation failed, trying alternative method..."
+    # Try to install a pre-built wheel if available
+    uv pip install flash-attn || print_warning "flash-attn installation skipped"
+}
+
+# Install VERL requirements if requirements.txt exists
+if [ -f "requirements.txt" ]; then
+    print_status "Installing VERL requirements from requirements.txt..."
+    uv pip install -r requirements.txt || {
+        print_warning "Some requirements failed to install, trying without deps..."
+        uv pip install -r requirements.txt --no-deps || print_warning "Some dependencies may be missing"
+    }
+else
+    print_warning "requirements.txt not found, skipping requirements installation"
+fi
+
+# Install VERL
 uv pip install --no-deps -e .
+
 cd ..
 
 # 10. Add vLLM
@@ -311,26 +338,20 @@ echo ""
 # Get system information
 UBUNTU_VERSION=$(lsb_release -d | awk -F'\t' '{print $2}')
 
-# Get Python version - prioritize venv Python if available
+# Get Python version - try multiple methods
 PYTHON_VERSION=""
 if [ -f ".venv/bin/python" ]; then
     PYTHON_VERSION=$(.venv/bin/python --version 2>&1 | awk '{print $2}')
-elif [ -f ".venv/bin/python3" ]; then
-    PYTHON_VERSION=$(.venv/bin/python3 --version 2>&1 | awk '{print $2}')
 elif command -v python3 &> /dev/null; then
     PYTHON_VERSION=$(python3 --version 2>&1 | awk '{print $2}')
-elif command -v python &> /dev/null; then
-    PYTHON_VERSION=$(python --version 2>&1 | awk '{print $2}')
 else
     PYTHON_VERSION="Not detected"
 fi
 
-# Get PyTorch version - check venv first, then system
+# Get PyTorch version
 PYTORCH_VERSION=""
 if [ -f ".venv/bin/python" ]; then
     PYTORCH_VERSION=$(.venv/bin/python -c "import torch; print(torch.__version__)" 2>/dev/null || echo "Not installed")
-elif [ -f ".venv/bin/python3" ]; then
-    PYTORCH_VERSION=$(.venv/bin/python3 -c "import torch; print(torch.__version__)" 2>/dev/null || echo "Not installed")
 else
     PYTORCH_VERSION=$(python3 -c "import torch; print(torch.__version__)" 2>/dev/null || echo "Not installed")
 fi
@@ -339,8 +360,6 @@ fi
 VLLM_VERSION=""
 if [ -f ".venv/bin/python" ]; then
     VLLM_VERSION=$(.venv/bin/python -c "import vllm; print(vllm.__version__)" 2>/dev/null || echo "Not installed")
-elif [ -f ".venv/bin/python3" ]; then
-    VLLM_VERSION=$(.venv/bin/python3 -c "import vllm; print(vllm.__version__)" 2>/dev/null || echo "Not installed")
 else
     VLLM_VERSION=$(python3 -c "import vllm; print(vllm.__version__)" 2>/dev/null || echo "Not installed")
 fi
@@ -352,8 +371,6 @@ CUDNN_VERSION="Not detected"
 # Method 1: Python/PyTorch
 if [ -f ".venv/bin/python" ]; then
     CUDNN_VERSION=$(.venv/bin/python -c "import torch; print(torch.backends.cudnn.version())" 2>/dev/null || echo "")
-elif [ -f ".venv/bin/python3" ]; then
-    CUDNN_VERSION=$(.venv/bin/python3 -c "import torch; print(torch.backends.cudnn.version())" 2>/dev/null || echo "")
 else
     CUDNN_VERSION=$(python3 -c "import torch; print(torch.backends.cudnn.version())" 2>/dev/null || echo "")
 fi
@@ -381,8 +398,6 @@ fi
 APEX_VERSION=""
 if [ -f ".venv/bin/python" ]; then
     APEX_VERSION=$(.venv/bin/python -c "import apex; print('Installed')" 2>/dev/null || echo "Not installed")
-elif [ -f ".venv/bin/python3" ]; then
-    APEX_VERSION=$(.venv/bin/python3 -c "import apex; print('Installed')" 2>/dev/null || echo "Not installed")
 else
     APEX_VERSION=$(python3 -c "import apex; print('Installed')" 2>/dev/null || echo "Not installed")
 fi
