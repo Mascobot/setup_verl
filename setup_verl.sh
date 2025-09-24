@@ -311,20 +311,26 @@ echo ""
 # Get system information
 UBUNTU_VERSION=$(lsb_release -d | awk -F'\t' '{print $2}')
 
-# Get Python version - try multiple methods
+# Get Python version - prioritize venv Python if available
 PYTHON_VERSION=""
 if [ -f ".venv/bin/python" ]; then
     PYTHON_VERSION=$(.venv/bin/python --version 2>&1 | awk '{print $2}')
+elif [ -f ".venv/bin/python3" ]; then
+    PYTHON_VERSION=$(.venv/bin/python3 --version 2>&1 | awk '{print $2}')
 elif command -v python3 &> /dev/null; then
     PYTHON_VERSION=$(python3 --version 2>&1 | awk '{print $2}')
+elif command -v python &> /dev/null; then
+    PYTHON_VERSION=$(python --version 2>&1 | awk '{print $2}')
 else
     PYTHON_VERSION="Not detected"
 fi
 
-# Get PyTorch version
+# Get PyTorch version - check venv first, then system
 PYTORCH_VERSION=""
 if [ -f ".venv/bin/python" ]; then
     PYTORCH_VERSION=$(.venv/bin/python -c "import torch; print(torch.__version__)" 2>/dev/null || echo "Not installed")
+elif [ -f ".venv/bin/python3" ]; then
+    PYTORCH_VERSION=$(.venv/bin/python3 -c "import torch; print(torch.__version__)" 2>/dev/null || echo "Not installed")
 else
     PYTORCH_VERSION=$(python3 -c "import torch; print(torch.__version__)" 2>/dev/null || echo "Not installed")
 fi
@@ -333,6 +339,8 @@ fi
 VLLM_VERSION=""
 if [ -f ".venv/bin/python" ]; then
     VLLM_VERSION=$(.venv/bin/python -c "import vllm; print(vllm.__version__)" 2>/dev/null || echo "Not installed")
+elif [ -f ".venv/bin/python3" ]; then
+    VLLM_VERSION=$(.venv/bin/python3 -c "import vllm; print(vllm.__version__)" 2>/dev/null || echo "Not installed")
 else
     VLLM_VERSION=$(python3 -c "import vllm; print(vllm.__version__)" 2>/dev/null || echo "Not installed")
 fi
@@ -344,6 +352,8 @@ CUDNN_VERSION="Not detected"
 # Method 1: Python/PyTorch
 if [ -f ".venv/bin/python" ]; then
     CUDNN_VERSION=$(.venv/bin/python -c "import torch; print(torch.backends.cudnn.version())" 2>/dev/null || echo "")
+elif [ -f ".venv/bin/python3" ]; then
+    CUDNN_VERSION=$(.venv/bin/python3 -c "import torch; print(torch.backends.cudnn.version())" 2>/dev/null || echo "")
 else
     CUDNN_VERSION=$(python3 -c "import torch; print(torch.backends.cudnn.version())" 2>/dev/null || echo "")
 fi
@@ -371,6 +381,8 @@ fi
 APEX_VERSION=""
 if [ -f ".venv/bin/python" ]; then
     APEX_VERSION=$(.venv/bin/python -c "import apex; print('Installed')" 2>/dev/null || echo "Not installed")
+elif [ -f ".venv/bin/python3" ]; then
+    APEX_VERSION=$(.venv/bin/python3 -c "import apex; print('Installed')" 2>/dev/null || echo "Not installed")
 else
     APEX_VERSION=$(python3 -c "import apex; print('Installed')" 2>/dev/null || echo "Not installed")
 fi
