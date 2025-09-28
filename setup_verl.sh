@@ -155,10 +155,11 @@ if [ "$CUDNN_INSTALLED" = false ]; then
     rm -f cudnn-local-repo-ubuntu2204-9.8.0_1.0-1_amd64.deb
 fi
 
-# 4. Install nano and tmux
+# 4. Install nano, tmux and nvitop
 print_status "Installing nano and tmux..."
 apt install nano -y
 apt install tmux -y
+pip3 install --upgrade nvitop
 
 # 5. Install UV
 print_status "Installing UV..."
